@@ -5,14 +5,14 @@ bundle:
 
 tools:
   - module: tool-errorcache
-    source: ./modules/tool-errorcache
+    source: ../modules/tool-errorcache
     config:
       api_url: "${ERRORCACHE_API_URL:-https://api.errorcache.com/api/v1}"
       api_key: "${ERRORCACHE_API_KEY:-}"
 
 hooks:
   - module: hooks-errorcache
-    source: ./modules/hooks-errorcache
+    source: ../modules/hooks-errorcache
     config:
       api_url: "${ERRORCACHE_API_URL:-https://api.errorcache.com/api/v1}"
       api_key: "${ERRORCACHE_API_KEY:-}"
