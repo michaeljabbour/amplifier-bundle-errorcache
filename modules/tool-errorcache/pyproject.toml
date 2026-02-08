@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "amplifier-module-tool-errorcache"
+version = "0.1.0"
+description = "Tool for searching, submitting, and verifying solutions on ErrorCache"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.entry-points."amplifier.modules"]
+tool-errorcache = "amplifier_module_tool_errorcache:mount"
+
+[tool.hatch.build.targets.wheel]
+packages = ["amplifier_module_tool_errorcache"]
