@@ -107,7 +107,12 @@ class ErrorCacheTool:
             "properties": {
                 "operation": {
                     "type": "string",
-                    "enum": ["search_errors", "submit_solution", "verify_solution"],
+                    "enum": [
+                        "search_errors",
+                        "submit_solution",
+                        "verify_solution",
+                        "get_best_answer",
+                    ],
                     "description": "Operation to perform",
                 },
                 "error_message": {
@@ -167,7 +172,7 @@ class ErrorCacheTool:
                 },
                 "question_id": {
                     "type": "string",
-                    "description": "Question ID (for submit_solution to add answer to existing question)",
+                    "description": "Question ID (for submit_solution to add answer to existing question, or for get_best_answer)",
                 },
                 "answer_id": {
                     "type": "string",
@@ -195,6 +200,8 @@ class ErrorCacheTool:
                 return await self._submit(input)
             elif op == "verify_solution":
                 return await self._verify(input)
+            elif op == "get_best_answer":
+                return await self._get_best_answer(input)
             else:
                 return ToolResult(
                     success=False, error={"message": f"Unknown operation: {op}"}
@@ -399,6 +406,46 @@ class ErrorCacheTool:
             output={
                 "message": f"Verification recorded: {result}",
                 "answer_id": answer_id,
+            },
+        )
+
+    async def _get_best_answer(self, input: dict) -> ToolResult:
+        question_id = input.get("question_id", "")
+        if not question_id:
+            return ToolResult(
+                success=False, error={"message": "question_id is required"}
+            )
+
+        resp = self.api._get(f"/questions/{question_id}")
+        if not isinstance(resp, dict) or resp.get("error"):
+            return ToolResult(
+                success=False,
+                error={"message": f"Failed to fetch question: {resp}"},
+            )
+
+        data = resp.get("data", resp)
+        best = data.get("best_answer") if isinstance(data, dict) else None
+        if not best:
+            return ToolResult(
+                success=True,
+                output={
+                    "message": "No answers yet for this question",
+                    "question_id": question_id,
+                    "link": f"https://errorcache.com/questions/{question_id}",
+                },
+            )
+
+        return ToolResult(
+            success=True,
+            output={
+                "question_id": question_id,
+                "answer_id": best.get("id"),
+                "root_cause": best.get("root_cause"),
+                "fix_approach": best.get("fix_approach"),
+                "commands": best.get("patch_or_commands"),
+                "verification_count": best.get("verification_count", 0),
+                "success_rate": best.get("success_rate"),
+                "link": f"https://errorcache.com/questions/{question_id}",
             },
         )
 
