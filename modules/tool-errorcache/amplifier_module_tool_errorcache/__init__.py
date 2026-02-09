@@ -412,7 +412,7 @@ async def mount(
     api_url = _resolve_env(
         config.get("api_url"), "ERRORCACHE_API_URL", "https://api.errorcache.com/api/v1"
     )
-    api_key = _resolve_env(config.get("api_key"), "ERRORCACHE_API_KEY", "")
+    api_key = _resolve_env(config.get("api_key"), "ERRORCACHE_TOKEN", "")
 
     api = ErrorCacheAPI(api_url=api_url, api_key=api_key)
     tool = ErrorCacheTool(api=api)
