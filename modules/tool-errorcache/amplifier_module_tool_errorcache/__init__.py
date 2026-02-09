@@ -5,12 +5,29 @@ from __future__ import annotations
 import json
 import os
 import platform
-import sys
+import re
 import urllib.parse
 import urllib.request
 from typing import Any
 
 from amplifier_core import ModuleCoordinator, ToolResult
+
+_UNRESOLVED_VAR = re.compile(r"\$\{.+\}")
+
+
+def _resolve_env(value: str | None, env_var: str, default: str) -> str:
+    """Resolve a config value, falling back to env var then default.
+
+    Handles unresolved ``${VAR:-default}`` patterns that YAML config loaders
+    may pass through literally when they don't support shell-style variable
+    interpolation.
+
+    Priority: real config value > environment variable > hardcoded default.
+    """
+    if value and not _UNRESOLVED_VAR.search(value):
+        return value
+    return os.environ.get(env_var, default)
+
 
 __amplifier_module_type__ = "tool"
 
@@ -41,7 +58,9 @@ class ErrorCacheAPI:
     def _get(self, path: str) -> dict | list | None:
         try:
             req = urllib.request.Request(
-                f"{self.api_url}{path}", headers=self._headers(), method="GET",
+                f"{self.api_url}{path}",
+                headers=self._headers(),
+                method="GET",
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return json.loads(resp.read())
@@ -52,8 +71,10 @@ class ErrorCacheAPI:
         try:
             data = json.dumps(body).encode()
             req = urllib.request.Request(
-                f"{self.api_url}{path}", data=data,
-                headers=self._headers(), method="POST",
+                f"{self.api_url}{path}",
+                data=data,
+                headers=self._headers(),
+                method="POST",
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return json.loads(resp.read())
@@ -117,8 +138,17 @@ class ErrorCacheTool:
                 "error_category": {
                     "type": "string",
                     "enum": [
-                        "connection", "dependency", "build", "runtime", "type_error",
-                        "permission", "config", "ssl_tls", "memory", "timeout", "other",
+                        "connection",
+                        "dependency",
+                        "build",
+                        "runtime",
+                        "type_error",
+                        "permission",
+                        "config",
+                        "ssl_tls",
+                        "memory",
+                        "timeout",
+                        "other",
                     ],
                     "description": "Error category (for submit_solution)",
                 },
@@ -166,14 +196,21 @@ class ErrorCacheTool:
             elif op == "verify_solution":
                 return await self._verify(input)
             else:
-                return ToolResult(success=False, error={"message": f"Unknown operation: {op}"})
+                return ToolResult(
+                    success=False, error={"message": f"Unknown operation: {op}"}
+                )
         except Exception as e:
-            return ToolResult(success=False, error={"message": str(e), "type": type(e).__name__})
+            return ToolResult(
+                success=False, error={"message": str(e), "type": type(e).__name__}
+            )
 
     async def _search(self, input: dict) -> ToolResult:
         error_msg = input.get("error_message", "")
         if not error_msg or len(error_msg) < 3:
-            return ToolResult(success=False, error={"message": "error_message is required (min 3 chars)"})
+            return ToolResult(
+                success=False,
+                error={"message": "error_message is required (min 3 chars)"},
+            )
 
         limit = input.get("limit", 5)
         language = input.get("language", "")
@@ -191,32 +228,45 @@ class ErrorCacheTool:
         # Phase 2: Full-text fallback
         if len(questions) < limit:
             remaining = limit - len(questions)
-            params = urllib.parse.urlencode({
-                "q": error_msg[:200],
-                "type": "questions",
-                "limit": remaining,
-                **({"language": language} if language else {}),
-                **({"framework": framework} if framework else {}),
-            })
+            params = urllib.parse.urlencode(
+                {
+                    "q": error_msg[:200],
+                    "type": "questions",
+                    "limit": remaining,
+                    **({"language": language} if language else {}),
+                    **({"framework": framework} if framework else {}),
+                }
+            )
             fts = self.api._get(f"/search?{params}")
             if isinstance(fts, dict) and not fts.get("error"):
                 fts_data = fts.get("data", fts)
-                fts_qs = fts_data.get("questions", fts_data) if isinstance(fts_data, dict) else fts_data
+                fts_qs = (
+                    fts_data.get("questions", fts_data)
+                    if isinstance(fts_data, dict)
+                    else fts_data
+                )
                 if isinstance(fts_qs, list):
                     seen = {q.get("id") for q in questions}
                     for q in fts_qs:
                         if q.get("id") not in seen:
                             questions.append(q)
 
-        search_method = "hybrid" if results and isinstance(results, dict) and results.get("search_method") else "signature+fts"
+        search_method = (
+            "hybrid"
+            if results and isinstance(results, dict) and results.get("search_method")
+            else "signature+fts"
+        )
 
         # Format output
         if not questions:
-            return ToolResult(success=True, output={
-                "message": "No solutions found",
-                "search_method": search_method,
-                "suggestion": "Use submit_solution to share if you solve this error",
-            })
+            return ToolResult(
+                success=True,
+                output={
+                    "message": "No solutions found",
+                    "search_method": search_method,
+                    "suggestion": "Use submit_solution to share if you solve this error",
+                },
+            )
 
         formatted = []
         for q in questions[:limit]:
@@ -240,11 +290,14 @@ class ErrorCacheTool:
                 }
             formatted.append(entry)
 
-        return ToolResult(success=True, output={
-            "results": formatted,
-            "count": len(formatted),
-            "search_method": search_method,
-        })
+        return ToolResult(
+            success=True,
+            output={
+                "results": formatted,
+                "count": len(formatted),
+                "search_method": search_method,
+            },
+        )
 
     async def _submit(self, input: dict) -> ToolResult:
         title = input.get("title", "")
@@ -254,29 +307,42 @@ class ErrorCacheTool:
         question_id = input.get("question_id")
 
         if not root_cause or len(root_cause) < 20:
-            return ToolResult(success=False, error={"message": "root_cause required (min 20 chars)"})
+            return ToolResult(
+                success=False, error={"message": "root_cause required (min 20 chars)"}
+            )
         if not fix_approach or len(fix_approach) < 20:
-            return ToolResult(success=False, error={"message": "fix_approach required (min 20 chars)"})
+            return ToolResult(
+                success=False, error={"message": "fix_approach required (min 20 chars)"}
+            )
 
         # If no question_id, create a new question first
         if not question_id:
             if not title or not error_sig:
-                return ToolResult(success=False, error={
-                    "message": "title and error_signature required when not providing question_id"
-                })
-            q_resp = self.api._post("/questions", {
-                "title": title[:300],
-                "error_signature": error_sig,
-                "error_category": input.get("error_category", "other"),
-                "environment": _detect_environment(),
-            })
+                return ToolResult(
+                    success=False,
+                    error={
+                        "message": "title and error_signature required when not providing question_id"
+                    },
+                )
+            q_resp = self.api._post(
+                "/questions",
+                {
+                    "title": title[:300],
+                    "error_signature": error_sig,
+                    "error_category": input.get("error_category", "other"),
+                    "environment": _detect_environment(),
+                },
+            )
             if not q_resp or q_resp.get("error"):
-                return ToolResult(success=False, error={
-                    "message": f"Failed to create question: {q_resp}"
-                })
+                return ToolResult(
+                    success=False,
+                    error={"message": f"Failed to create question: {q_resp}"},
+                )
             question_id = q_resp.get("data", {}).get("id")
             if not question_id:
-                return ToolResult(success=False, error={"message": "No question ID returned"})
+                return ToolResult(
+                    success=False, error={"message": "No question ID returned"}
+                )
 
         # Submit answer
         answer_body = {
@@ -288,17 +354,20 @@ class ErrorCacheTool:
 
         a_resp = self.api._post(f"/questions/{question_id}/answers", answer_body)
         if not a_resp or a_resp.get("error"):
-            return ToolResult(success=False, error={
-                "message": f"Failed to submit answer: {a_resp}"
-            })
+            return ToolResult(
+                success=False, error={"message": f"Failed to submit answer: {a_resp}"}
+            )
 
         answer_id = a_resp.get("data", {}).get("id", "unknown")
-        return ToolResult(success=True, output={
-            "message": "Solution submitted to ErrorCache",
-            "question_id": question_id,
-            "answer_id": answer_id,
-            "link": f"https://errorcache.com/questions/{question_id}",
-        })
+        return ToolResult(
+            success=True,
+            output={
+                "message": "Solution submitted to ErrorCache",
+                "question_id": question_id,
+                "answer_id": answer_id,
+                "link": f"https://errorcache.com/questions/{question_id}",
+            },
+        )
 
     async def _verify(self, input: dict) -> ToolResult:
         answer_id = input.get("answer_id", "")
@@ -307,7 +376,10 @@ class ErrorCacheTool:
         if not answer_id:
             return ToolResult(success=False, error={"message": "answer_id is required"})
         if result not in ("pass", "fail", "partial"):
-            return ToolResult(success=False, error={"message": "result must be pass, fail, or partial"})
+            return ToolResult(
+                success=False,
+                error={"message": "result must be pass, fail, or partial"},
+            )
 
         body = {
             "result": result,
@@ -318,14 +390,17 @@ class ErrorCacheTool:
 
         resp = self.api._post(f"/answers/{answer_id}/verify", body)
         if not resp or resp.get("error"):
-            return ToolResult(success=False, error={
-                "message": f"Verification failed: {resp}"
-            })
+            return ToolResult(
+                success=False, error={"message": f"Verification failed: {resp}"}
+            )
 
-        return ToolResult(success=True, output={
-            "message": f"Verification recorded: {result}",
-            "answer_id": answer_id,
-        })
+        return ToolResult(
+            success=True,
+            output={
+                "message": f"Verification recorded: {result}",
+                "answer_id": answer_id,
+            },
+        )
 
 
 async def mount(
@@ -334,8 +409,10 @@ async def mount(
 ) -> None:
     """Mount the ErrorCache tool."""
     config = config or {}
-    api_url = config.get("api_url", "https://api.errorcache.com/api/v1")
-    api_key = config.get("api_key", "")
+    api_url = _resolve_env(
+        config.get("api_url"), "ERRORCACHE_API_URL", "https://api.errorcache.com/api/v1"
+    )
+    api_key = _resolve_env(config.get("api_key"), "ERRORCACHE_API_KEY", "")
 
     api = ErrorCacheAPI(api_url=api_url, api_key=api_key)
     tool = ErrorCacheTool(api=api)
