@@ -11,8 +11,10 @@ hooks:
   - module: hooks-errorcache
     source: ../modules/hooks-errorcache
     config:
-      auto_search: true
-      auto_submit: true
+      # Outbound lookup sends a locally-redacted error signature to the ErrorCache
+      # API. It is OFF unless you opt in by setting auto_search: true.
+      auto_search: false
+      auto_submit: false
 
 context:
   include:

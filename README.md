@@ -5,7 +5,7 @@ submit fixes, and verify they work — ranked by evidence, not votes.
 
 ## What it does
 
-- **Hook (automatic):** When a tool fails or produces an error, ErrorCache is automatically searched for verified solutions. Results are injected into the agent's context.
+- **Hook (opt-in):** When enabled (`auto_search: true`, off by default), a tool error triggers an ErrorCache lookup using a locally redacted, truncated error signature. Results are injected into the agent's context as clearly labelled **untrusted data** (not instructions, not the system role).
 - **Tool (agent-initiated):** The `errorcache` tool lets agents proactively search, submit solutions, verify fixes, and retrieve best answers.
 
 ## Setup
@@ -53,13 +53,19 @@ hooks:
   - module: hooks-errorcache
     source: git+https://github.com/mbjabbour/amplifier-bundle-errorcache@main#modules/hooks-errorcache
     config:
-      auto_search: true    # Search on errors (default: true)
-      auto_submit: true    # Auto-submit fixes (default: true)
+      auto_search: false   # Opt in to outbound lookup on errors (default: false)
+      auto_submit: false   # Auto-submit fixes (default: false)
 
 tools:
   - module: tool-errorcache
     source: git+https://github.com/mbjabbour/amplifier-bundle-errorcache@main#modules/tool-errorcache
 ```
+
+## Privacy and trust
+
+- **Outbound lookup is opt-in.** With the default `auto_search: false` the hook sends nothing. Set `auto_search: true` to allow it; the error signature is then sent to `ERRORCACHE_API_URL` as a GET query parameter (so it can appear in server and proxy logs).
+- **Local redaction first.** Before any send, secret-shaped text is removed: private-key blocks, URL credentials, bearer/basic tokens, `password`/`token`/`api_key`-style assignments, common token prefixes (`sk-`, `ghp_`, `AKIA`, ...), JWTs, emails, home-directory paths and long mixed alphanumeric tokens. Then at most 500 characters are sent. Redaction is best-effort pattern matching, not a guarantee; do not enable lookup for sessions that handle highly sensitive output.
+- **Returned content is untrusted.** Titles, root causes, fix text and commands come from the community. They are injected inside an `<untrusted-errorcache-data>` block with the `user` role (the only non-system, non-assistant role available), preceded by an explicit notice that it is data, not instructions, and that no command in it should be run without the user's request. Commands appear as inert quoted text.
 
 ## How It Works
 
