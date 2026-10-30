@@ -2,7 +2,7 @@
 bundle:
   name: errorcache
   version: 0.1.0
-  description: ErrorCache integration - verified collective memory for AI coding agents
+  description: ErrorCache community error reports with explicit trust and outbound boundaries
 
 includes:
   - bundle: errorcache:behaviors/errorcache

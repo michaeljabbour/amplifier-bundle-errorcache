@@ -20,6 +20,9 @@ from typing import Any, Callable
 
 from amplifier_core import HookResult, ModuleCoordinator
 
+from .redaction import redact_payload, redact_secrets
+from .transport import authorize_request
+
 _UNRESOLVED_VAR = re.compile(r"\$\{.+\}")
 
 
@@ -56,51 +59,6 @@ def _as_bool(value: Any, default: bool) -> bool:
             return False
     return default
 
-
-_PEM = re.compile(
-    r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)", re.DOTALL
-)
-_URL_CREDS = re.compile(r"(://)[^/\s:@]+:[^/\s@]+@")
-_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}")
-_KEY_VALUE = re.compile(
-    r"(?i)\b([\w.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key"
-    r"|private[_-]?key|auth|credential)[\w.-]*)(\s*[=:]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;&]+)"
-)
-_KNOWN_TOKENS = re.compile(
-    r"\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_\w{20,}"
-    r"|xox[abprs]-[A-Za-z0-9-]{10,}|A(?:KIA|SIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})"
-)
-_JWT = re.compile(r"\beyJ[\w-]+\.[\w-]+\.[\w-]+")
-_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_HOME_POSIX = re.compile(r"(?:/Users|/home)/[^\s:'\"]+")
-_HOME_WIN = re.compile(r"[A-Za-z]:\\Users\\[^\s:'\"]+", re.IGNORECASE)
-_LONG_TOKEN = re.compile(r"\b[A-Za-z0-9+/_-]{40,}\b")
-
-
-def _redact_long(m: re.Match[str]) -> str:
-    t = m.group(0)
-    if any(c.isdigit() for c in t) and any(c.isalpha() for c in t):
-        return "<redacted:token>"
-    return t
-
-
-def redact_secrets(text: str) -> str:
-    """Remove secret-shaped substrings locally, before anything leaves the machine.
-
-    Covers private-key blocks, URL credentials, bearer/basic tokens, key=value
-    secrets (password, token, api_key, ...), well-known token prefixes, JWTs,
-    emails, home-directory paths, and long mixed alphanumeric tokens.
-    """
-    text = _PEM.sub("<redacted:private-key>", text)
-    text = _URL_CREDS.sub(r"\1<redacted>@", text)
-    text = _BEARER.sub(r"\1 <redacted>", text)
-    text = _KEY_VALUE.sub(r"\1\2<redacted>", text)
-    text = _KNOWN_TOKENS.sub("<redacted:token>", text)
-    text = _JWT.sub("<redacted:jwt>", text)
-    text = _EMAIL.sub("<redacted:email>", text)
-    text = _HOME_POSIX.sub("~", text)
-    text = _HOME_WIN.sub("~", text)
-    return _LONG_TOKEN.sub(_redact_long, text)
 
 # Patterns that indicate errors in tool output (even when tool "succeeds")
 ERROR_PATTERNS = [
@@ -175,8 +133,6 @@ class ErrorCacheClient:
 
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json", "Accept": "application/json"}
-        if self.api_key:
-            h["Authorization"] = f"Bearer {self.api_key}"
         return h
 
     def search(self, error_text: str, limit: int = 3) -> list[dict]:
@@ -186,6 +142,7 @@ class ErrorCacheClient:
             sig = urllib.parse.quote(redact_secrets(error_text)[:_MAX_SIGNATURE_CHARS])
             url = f"{self.api_url}/search/similar?error_signature={sig}&limit={limit}"
             req = urllib.request.Request(url, headers=self._headers(), method="GET")
+            authorize_request(req, self.api_key)
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read())
                 results = data if isinstance(data, list) else data.get("data", [])
@@ -209,7 +166,7 @@ class ErrorCacheClient:
                     "title": redact_secrets(title)[:300],
                     "error_signature": redact_secrets(error_signature),
                     "error_category": "other",
-                    "environment": environment or {},
+                    "environment": redact_payload(environment or {}),
                 }
             ).encode()
             q_req = urllib.request.Request(
@@ -218,6 +175,7 @@ class ErrorCacheClient:
                 headers=self._headers(),
                 method="POST",
             )
+            authorize_request(q_req, self.api_key)
             with urllib.request.urlopen(q_req, timeout=10) as resp:
                 q_data = json.loads(resp.read())
                 question_id = q_data.get("data", {}).get("id")
@@ -238,6 +196,7 @@ class ErrorCacheClient:
                 headers=self._headers(),
                 method="POST",
             )
+            authorize_request(a_req, self.api_key)
             with urllib.request.urlopen(a_req, timeout=10):
                 return True
         except Exception:
