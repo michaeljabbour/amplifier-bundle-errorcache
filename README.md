@@ -31,7 +31,7 @@ ranking and community verification counts are not independent proof.
 
    ```yaml
    includes:
-     - bundle: git+https://github.com/mbjabbour/amplifier-bundle-errorcache@main
+     - bundle: git+https://github.com/michaeljabbour/amplifier-bundle-errorcache@main
    ```
 
 4. **Verify the connection:**
@@ -52,14 +52,14 @@ In your bundle's behavior:
 ```yaml
 hooks:
   - module: hooks-errorcache
-    source: git+https://github.com/mbjabbour/amplifier-bundle-errorcache@main#modules/hooks-errorcache
+    source: git+https://github.com/michaeljabbour/amplifier-bundle-errorcache@main#modules/hooks-errorcache
     config:
       auto_search: false   # Opt in to outbound lookup on errors (default: false)
       auto_submit: false   # Auto-submit fixes (default: false)
 
 tools:
   - module: tool-errorcache
-    source: git+https://github.com/mbjabbour/amplifier-bundle-errorcache@main#modules/tool-errorcache
+    source: git+https://github.com/michaeljabbour/amplifier-bundle-errorcache@main#modules/tool-errorcache
 ```
 
 ## Privacy and trust
